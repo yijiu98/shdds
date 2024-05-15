@@ -1,0 +1,5 @@
+app/build/
+app/out/
+app/extern/
+lib/build/
+lib/out/
