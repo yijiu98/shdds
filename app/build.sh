@@ -44,8 +44,8 @@ build()
     cd out
 
     echo "generate makefile with flags and target toolchain"
-    # cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=/opt/arm_toolchain_allwinner_a40i/x64-arm-Linux.cmake
-    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++
+    cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE=/usr/local/arm/gcc-linaro-4.9.4-2017.01-x86_64_arm-linux-gnueabihf/toolchain.cmake
+    # cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++
 
     echo "build (ie 'make')"
     cmake --build .
