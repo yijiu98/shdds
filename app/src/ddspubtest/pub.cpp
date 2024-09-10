@@ -8,12 +8,13 @@
 void batRetCbk(void* pMsg)
 {
     Battery* msg = (Battery*)pMsg;
-    printf("recv cutmotor soc:%d,soh:%d \n",msg->soc,msg->soh);
+    printf("recv battery soc:%d,soh:%d \n",msg->soc,msg->soh);
 }
 
 
 int main(int argc, char **argv)
 {
+
     shdds::init(true);
     std::shared_ptr<shdds::Publisher<CutMotor>> m_Pub_Cut_Motor = std::make_shared<shdds::Publisher<CutMotor>>("cutMotor");
     CutMotor cutMotor = 
@@ -28,6 +29,10 @@ int main(int argc, char **argv)
     m_Sub_Battery->subscribe(cb);
     while(true)
     {
+          // 获取当前时间戳（微秒级别）并存储为 long long int
+        auto now = std::chrono::high_resolution_clock::now();
+        long long int time_stamp = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
+        cutMotor.timestamp=time_stamp;
         cutMotor.rpm++;
         m_Pub_Cut_Motor->publish(cutMotor);
         std::this_thread::sleep_for(std::chrono::seconds(1));

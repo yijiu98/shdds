@@ -8,6 +8,15 @@
 void cutRetCbk(void* pMsg)
 {
     CutMotor* msg = (CutMotor*)pMsg;
+    long long int send_time_stamp = msg->timestamp;
+    // 获取当前时间戳（微秒级别）
+    auto recv_time = std::chrono::high_resolution_clock::now();
+    
+    long long int recv_time_stamp = std::chrono::duration_cast<std::chrono::microseconds>(recv_time.time_since_epoch()).count();
+
+    // 计算延迟
+    long long int latency = recv_time_stamp - send_time_stamp;
+    std::cout << "Communication delay: " << latency << " microseconds" << std::endl;
     printf("recv cutmotor state:%d,rpm:%d \n",msg->state,msg->rpm);
 }
 

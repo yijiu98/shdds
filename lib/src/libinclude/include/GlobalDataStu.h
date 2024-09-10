@@ -2,6 +2,7 @@
 
 typedef struct CutMotor
 {
+    long long int timestamp;
  	unsigned int state;
     unsigned int rpm;
 }CutMotor;

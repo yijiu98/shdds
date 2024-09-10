@@ -70,10 +70,10 @@ void DataManager::SubThreadFunc()
         auto it = m_sub_map.find(m_data_shm->topic);
         if (it != m_sub_map.end()) 
         {
-            std::cout<<"find topic"<<std::endl;
+            // std::cout<<"find topic"<<std::endl;
             if(it->second != nullptr)
             {
-                std::cout<<"is not nullptr"<<std::endl;
+                // std::cout<<"is not nullptr"<<std::endl;
                 it->second(m_data_shm->data);
             }
             else
@@ -100,7 +100,7 @@ void DataManager::write(const std::string& topic_name,const void* p_topic_msg,in
     pthread_mutex_lock(&m_data_shm->mutex);//确保对共享内存中的数据 (shared->data) 的访问是互斥的，即在任何时刻只有一个进程能修改这个数据
     memcpy(m_data_shm->data,p_topic_msg,len);
     strcpy(m_data_shm->topic,topic_name.c_str());
-    printf("Published topic data \n");
+    // printf("Published topic data \n");
     pthread_cond_broadcast(&m_data_shm->cond);  // 通知所有等待的订阅者
     pthread_mutex_unlock(&m_data_shm->mutex);
 }
