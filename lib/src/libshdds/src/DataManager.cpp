@@ -48,7 +48,6 @@ bool DataManager::init(bool is_mgr)
         pthread_condattr_setpshared(&condAttr, PTHREAD_PROCESS_SHARED);
         pthread_cond_init(&m_data_shm->cond, &condAttr);
     }
-
     std::thread subThread (&DataManager::SubThreadFunc ,this);
     if (subThread.joinable())
     {
@@ -58,65 +57,72 @@ bool DataManager::init(bool is_mgr)
 }
 void DataManager::deinit(bool is_mgr)
 {
+    // 停止线程
+    start_threads.store(false);
 
+    // 解除映射的共享内存
+    if (m_data_shm != nullptr)
+    {
+        if (munmap(m_data_shm, sizeof(shared_struct)) == -1) {
+            perror("munmap");
+        }
+        m_data_shm = nullptr;
+    }
+
+
+    // 仅在管理进程中移除共享内存对象
+    if (is_mgr)
+    {
+        if (shm_unlink("/myshm") == -1) {
+            perror("shm_unlink");
+        }
+    }
 }
+
+
+
 void DataManager::SubThreadFunc()
 {
     std::cout<<"DataManager::SubThreadFunc"<<std::endl;
-    while(true)
+    while(start_threads.load())
     {
         pthread_mutex_lock(&m_data_shm->mutex);//防止读取时刻数据被修改
         pthread_cond_wait(&m_data_shm->cond, &m_data_shm->mutex); // 在调用 pthread_cond_wait 前，这个互斥锁必须由调用线程持有（即已经被锁定）
-        auto it = m_sub_map.find(m_data_shm->topic);
-        if (it != m_sub_map.end()) 
+         // 获取最近更新的 topic 索引
+        int updated_index = m_data_shm->last_updated_topic_index;
+
+        // 确保该索引合法
+        if (updated_index >= 0 && updated_index < MAX_TOPICS && strlen(m_data_shm->topics[updated_index]) > 0)
         {
-            // std::cout<<"find topic"<<std::endl;
-            if(it->second != nullptr)
+            auto it = m_sub_map.find(m_data_shm->topics[updated_index]);
+            if (it != m_sub_map.end() && it->second != nullptr)
             {
-                // std::cout<<"is not nullptr"<<std::endl;
-                it->second(m_data_shm->data);
-            }
-            else
-            {
-                std::cout<<"is nullptr"<<std::endl;
+                // 执行该 topic 对应的回调
+                it->second(m_data_shm->data[updated_index]);
             }
         }
+        // for (int i = 0; i < MAX_TOPICS; ++i)
         // {
-        //     // 如果存在，执行对应的回调函数
-        //     it->second(m_data_shm->data);
-        // } 
-        // else 
-        // {
-        //     // 如果 topic 不存在，输出提示信息
-        //     std::cout << "No callback registered for topic: " << m_data_shm->topic << std::endl;
+        //     if (strlen(m_data_shm->topics[i]) > 0)  // 如果该 topic 不为空
+        //     {
+        //         auto it = m_sub_map.find(m_data_shm->topics[i]);
+        //         if (it != m_sub_map.end() && it->second != nullptr)
+        //         {
+        //             it->second(m_data_shm->data[i]);
+        //         }
+        //     }
         // }
         
         pthread_mutex_unlock(&m_data_shm->mutex);
     }
 }    
 
-void DataManager::write(const std::string& topic_name,const void* p_topic_msg,int len)
-{
-    pthread_mutex_lock(&m_data_shm->mutex);//确保对共享内存中的数据 (shared->data) 的访问是互斥的，即在任何时刻只有一个进程能修改这个数据
-    memcpy(m_data_shm->data,p_topic_msg,len);
-    strcpy(m_data_shm->topic,topic_name.c_str());
-    // printf("Published topic data \n");
-    pthread_cond_broadcast(&m_data_shm->cond);  // 通知所有等待的订阅者
-    pthread_mutex_unlock(&m_data_shm->mutex);
-}
+
+
 void DataManager::regSubCbk(const std::string& topic,std::function<void(void*)> fun)
 {
     if (m_sub_map.find(topic) == m_sub_map.end()) 
     {
-        // 如果不存在，添加 topic 和对应的回调函数
-        if(fun == nullptr)
-        {
-            std::cout << "Registered new callback for topic:is nullptr " << topic << std::endl;
-        }
-        else 
-        {
-            std::cout << "Registered new callback for topic:is not nullptr " << topic << std::endl;
-        }
         m_sub_map[topic] = fun;
         std::cout << "Registered new callback for topic: " << topic << std::endl;
     } 
@@ -125,6 +131,54 @@ void DataManager::regSubCbk(const std::string& topic,std::function<void(void*)> 
         // 如果已存在，输出提示信息
         std::cout << "Callback already registered for topic: " << topic << std::endl;
     } 
+}
+int DataManager::findTopicIndex(const std::string& topic_name)
+{
+    // 查找是否已经存在该 topic
+    for (int i = 0; i < MAX_TOPICS; ++i)
+    {
+        if (strcmp(m_data_shm->topics[i], topic_name.c_str()) == 0)
+        {
+            // 找到了已有的 topic，返回它的索引
+            return i;
+        }
+    }
+
+    // 如果没有找到相应的 topic，查找空位来创建新的 topic
+    for (int i = 0; i < MAX_TOPICS; ++i)
+    {
+        if (m_data_shm->topics[i][0] == '\0')  // 检查是否为空字符串，空表示该位置可用
+        {
+            // 在此空位置创建新的 topic
+            strcpy(m_data_shm->topics[i], topic_name.c_str());
+            return i;  // 返回新创建的 topic 的索引
+        }
+    }
+
+    // 如果没有找到空位，返回 -1，表示 topic 空间已满
+    return -1;
+}
+void DataManager::write(const std::string& topic_name, const void* p_topic_msg, int len)
+{
+    pthread_mutex_lock(&m_data_shm->mutex);
+
+    // 查找或创建 topic
+    int topic_index = findTopicIndex(topic_name);
+    if (topic_index == -1)
+    {
+        // 如果没有找到 topic，且无法创建新的 topic（因为空间满了）
+        printf("无法创建新 topic，最大容量已满或无法找到 topic\n");
+        pthread_mutex_unlock(&m_data_shm->mutex);
+        return;
+    }
+
+    // 写入数据到对应的 topic
+    memcpy(m_data_shm->data[topic_index], p_topic_msg, len);
+    m_data_shm->last_updated_topic_index = topic_index;
+    // 广播通知订阅者
+    pthread_cond_broadcast(&m_data_shm->cond);
+    
+    pthread_mutex_unlock(&m_data_shm->mutex);
 }
 
 }

@@ -14,8 +14,7 @@ bool init(bool is_mgr)
 }
 void deinit(bool is_mgr)
 {
-    ShddsMgr::Instance()->deinit();
-    std::cout<<"hello world"<<std::endl;
+    ShddsMgr::Instance()->deinit(is_mgr);
 }
 
 

@@ -11,7 +11,7 @@ bool PublishMgr::init(bool is_mgr)
 
 void PublishMgr::deinit(bool is_mgr)
 {
-    
+    DataManager::Instance()->deinit(is_mgr);
 }
 
 void PublishMgr::publish(const std::string& topic_name,const void* p_topic_msg,int len)

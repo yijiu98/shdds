@@ -19,7 +19,8 @@ bool ShddsMgr::init(bool is_mgr)
 
 void ShddsMgr::deinit(bool is_mgr)
 {
-
+    m_pub_mgr->deinit(is_mgr);
+    m_sub_mgr->deinit(is_mgr);
 }
 
 void ShddsMgr::publish(const std::string& topic_name,const void* p_topic_msg,int len)

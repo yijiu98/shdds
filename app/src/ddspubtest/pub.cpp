@@ -3,8 +3,14 @@
 #include <thread>
 #include <memory>  // 包含智能指针的头文件
 #include "GlobalDataStu.h"
-
-
+#include <csignal>
+#include <unistd.h>
+// 信号处理函数
+void signalHandler(int signum) 
+{
+    shdds::deinit(true);
+    exit(signum);
+}
 void batRetCbk(void* pMsg)
 {
     Battery* msg = (Battery*)pMsg;
@@ -14,13 +20,21 @@ void batRetCbk(void* pMsg)
 
 int main(int argc, char **argv)
 {
-
+    signal(SIGINT, signalHandler);
     shdds::init(true);
+
     std::shared_ptr<shdds::Publisher<CutMotor>> m_Pub_Cut_Motor = std::make_shared<shdds::Publisher<CutMotor>>("cutMotor");
     CutMotor cutMotor = 
     {
         .state=1,
         .rpm=2400
+    };
+
+    std::shared_ptr<shdds::Publisher<LeftMotor>> m_Pub_Left_Motor = std::make_shared<shdds::Publisher<LeftMotor>>("leftMotor");
+    LeftMotor leftMotor = 
+    {
+        .state=2,
+        .rpm=9600
     };
 
 
@@ -35,7 +49,13 @@ int main(int argc, char **argv)
         cutMotor.timestamp=time_stamp;
         cutMotor.rpm++;
         m_Pub_Cut_Motor->publish(cutMotor);
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+
+
+
+        leftMotor.rpm++;
+        m_Pub_Left_Motor->publish(leftMotor);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
     // shdds::publish();
     exit(1);

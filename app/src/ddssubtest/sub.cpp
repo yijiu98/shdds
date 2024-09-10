@@ -4,7 +4,14 @@
 #include <thread>
 #include <memory>  // 包含智能指针的头文件
 #include "GlobalDataStu.h"
-
+#include <csignal>
+#include <unistd.h>
+// 信号处理函数
+void signalHandler(int signum) 
+{
+    shdds::deinit(false);
+    exit(signum);
+}
 void cutRetCbk(void* pMsg)
 {
     CutMotor* msg = (CutMotor*)pMsg;
@@ -19,16 +26,24 @@ void cutRetCbk(void* pMsg)
     std::cout << "Communication delay: " << latency << " microseconds" << std::endl;
     printf("recv cutmotor state:%d,rpm:%d \n",msg->state,msg->rpm);
 }
-
+void leftRetCbk(void* pMsg)
+{
+    LeftMotor* msg = (LeftMotor*)pMsg;
+    printf("recv leftmotor state:%d,rpm:%d \n",msg->state,msg->rpm);
+}
 
 int main(int argc, char **argv)
 {
+    signal(SIGINT, signalHandler);
     shdds::init(false);
+
     std::shared_ptr<shdds::Subscriber<CutMotor>> m_Sub_Cut_Motor = std::make_shared<shdds::Subscriber<CutMotor>>("cutMotor");
     std::function<void(void*)> cb = std::bind(cutRetCbk,std::placeholders::_1);
     m_Sub_Cut_Motor->subscribe(cb);
 
-
+    std::shared_ptr<shdds::Subscriber<LeftMotor>> m_Sub_Left_Motor = std::make_shared<shdds::Subscriber<LeftMotor>>("leftMotor");
+    std::function<void(void*)> cb2 = std::bind(leftRetCbk,std::placeholders::_1);
+    m_Sub_Left_Motor->subscribe(cb2);
 
     std::shared_ptr<shdds::Publisher<Battery>> m_Pub_Battery = std::make_shared<shdds::Publisher<Battery>>("battery");
     Battery battery = 

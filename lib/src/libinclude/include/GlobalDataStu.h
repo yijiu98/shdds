@@ -11,3 +11,8 @@ typedef struct Battery
  	unsigned int soc;
     unsigned int soh;
 }Battery;
+typedef struct LeftMotor
+{
+    unsigned int state;
+    unsigned int rpm;
+}LeftMotor;
