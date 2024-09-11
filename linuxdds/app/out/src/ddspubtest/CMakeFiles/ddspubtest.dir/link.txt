@@ -1,0 +1,1 @@
+/usr/bin/g++ -O3 -DNDEBUG CMakeFiles/ddspubtest.dir/pub.cpp.o -o ../../../build/bin/ddspubtest   -L/home/yijiu98/yijiu98/cc++test/shdds/linuxdds/app/out/../extern/lib  -Wl,-rpath,/home/yijiu98/yijiu98/cc++test/shdds/linuxdds/app/out/../extern/lib -lpthread -lrt -lshdds 

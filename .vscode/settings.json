@@ -66,6 +66,8 @@
         "cinttypes": "cpp",
         "typeindex": "cpp",
         "typeinfo": "cpp",
-        "csignal": "cpp"
+        "csignal": "cpp",
+        "topicmgr.h": "c",
+        "cfenv": "cpp"
     }
 }

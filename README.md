@@ -14,5 +14,7 @@ app文件夹中存放使用示例。
 
 ### 待解决问题
 1 qos
-2 dds::deinit
-3 同时多个topic发布
+
+
+# 版本更新记录
+新增mcu端dds设计（mcudds）

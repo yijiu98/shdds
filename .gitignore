@@ -3,3 +3,6 @@ app/out/
 app/extern/
 lib/build/
 lib/out/
+mcudds/out/
+mcudds/build/
+mcudds/extern/
