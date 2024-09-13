@@ -1,5 +1,10 @@
 #ifndef __COMMMGR_H__
 #define __COMMMGR_H__
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "GlobalDataStu.h"
 
 
@@ -48,5 +53,10 @@ extern  S32 Publish(const char* commName, void* commMsg);
 extern  S32 Subscribe(const char* commName, SubCallback callback);
 extern  void RegsCmdAgentRecvFun(U8 * recvBuf, U8 * pLen);
 extern  void RegsCmdAgentSendFun(SendFun fun);//reg send function
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

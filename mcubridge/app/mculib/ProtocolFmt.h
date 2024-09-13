@@ -1,5 +1,9 @@
 #ifndef __PROTOCOLFMT_H_
 #define __PROTOCOLFMT_H_
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "GlobalDataStu.h"
 
 #define U8_BYTE (1)
@@ -30,4 +34,9 @@ extern F32 UnFmtF32(const U8** pSrc);
 extern U64 UnFmtU64(const U8** pSrc);
 
 extern D64 SavePrec(D64 para, U64 mult);
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif

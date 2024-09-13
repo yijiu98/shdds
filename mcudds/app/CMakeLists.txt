@@ -13,12 +13,12 @@ set(CMAKE_C_STANDARD 99)
 # 包含头文件目录
 include_directories(
     ${CMAKE_SOURCE_DIR}/app/extern
-    ${CMAKE_SOURCE_DIR}/app/src
+    ${CMAKE_SOURCE_DIR}/app/mculib
 )
 
 # 查找 app/src 目录下的所有源文件
 file(GLOB_RECURSE SRC_FILES
-    "${CMAKE_SOURCE_DIR}/app/src/*.c"
+    "${CMAKE_SOURCE_DIR}/app/mculib/*.c"
 )
 
 # 生成可执行文件
