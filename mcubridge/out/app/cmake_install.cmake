@@ -1,4 +1,4 @@
-# Install script for directory: /home/yijiu98/yijiu98/cc++test/shdds/mcubridge/app
+# Install script for directory: /home/yijiu98/yijiu98/c++project/shdds/mcubridge/app
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)

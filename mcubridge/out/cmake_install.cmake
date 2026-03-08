@@ -1,4 +1,4 @@
-# Install script for directory: /home/yijiu98/yijiu98/cc++test/shdds/mcubridge
+# Install script for directory: /home/yijiu98/yijiu98/c++project/shdds/mcubridge
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
@@ -44,7 +44,7 @@ endif()
 
 if(NOT CMAKE_INSTALL_LOCAL_ONLY)
   # Include the install script for each subdirectory.
-  include("/home/yijiu98/yijiu98/cc++test/shdds/mcubridge/out/app/cmake_install.cmake")
+  include("/home/yijiu98/yijiu98/c++project/shdds/mcubridge/out/app/cmake_install.cmake")
 
 endif()
 
@@ -56,5 +56,5 @@ endif()
 
 string(REPLACE ";" "\n" CMAKE_INSTALL_MANIFEST_CONTENT
        "${CMAKE_INSTALL_MANIFEST_FILES}")
-file(WRITE "/home/yijiu98/yijiu98/cc++test/shdds/mcubridge/out/${CMAKE_INSTALL_MANIFEST}"
+file(WRITE "/home/yijiu98/yijiu98/c++project/shdds/mcubridge/out/${CMAKE_INSTALL_MANIFEST}"
      "${CMAKE_INSTALL_MANIFEST_CONTENT}")

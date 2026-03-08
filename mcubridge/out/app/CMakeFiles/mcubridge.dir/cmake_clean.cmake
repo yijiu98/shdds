@@ -1,6 +1,6 @@
 file(REMOVE_RECURSE
-  "../../build/bin/mcubridge"
-  "../../build/bin/mcubridge.pdb"
+  "/home/yijiu98/yijiu98/c++project/shdds/mcubridge/build/bin/mcubridge"
+  "/home/yijiu98/yijiu98/c++project/shdds/mcubridge/build/bin/mcubridge.pdb"
   "CMakeFiles/mcubridge.dir/bridgeMgr/BridgeMgr.cpp.o"
   "CMakeFiles/mcubridge.dir/bridgeMgr/BridgeMgr.cpp.o.d"
   "CMakeFiles/mcubridge.dir/main.cpp.o"
