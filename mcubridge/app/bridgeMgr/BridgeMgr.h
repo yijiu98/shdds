@@ -1,15 +1,10 @@
 #pragma once
+#include <memory>
 #include <string>
 #include "shdds.h"
 #include "DDS.h"
 
 #define MAX_INS (4)
-
-
-
-
-
-
 
 template <class T>
 class MsgPublishToLinux
@@ -19,7 +14,7 @@ class MsgPublishToLinux
     MsgPublishToLinux(const std::string & topic_name):mTopicName(topic_name)
     {
       gIns[gInsNum] = this;
-      
+
       getInterface()->subscribe(topic_name.c_str(),MsgPublishToLinux::MsgPubCallback);
 
       mPub = std::make_shared<shdds::Publisher<T>>(topic_name);
@@ -28,23 +23,10 @@ class MsgPublishToLinux
     }
 
     static MsgPublishToLinux* gIns[MAX_INS];
-    static int gInsNum; 
+    static int gInsNum;
 
   private:
 
-    // static void MsgPubCallback(void * pMsg,char* topicName)
-    // {
-    //   for(int i = 0;i<gInsNum; i++)
-    //   {
-    //     if(gIns[i] != nullptr) 
-    //     {
-    //       if(topicName == gIns[i]->mTopicName)
-    //       {
-    //         (gIns[i]->mPub)->publish((T*)pMsg);
-    //       }
-    //     }
-    //   }
-    // }
     static void MsgPubCallback(void * pMsg)
     {
       for(int i = 0;i<gInsNum; i++)

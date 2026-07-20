@@ -1,61 +1,110 @@
-#include <iostream>
-#include "shdds.h"
-#include <thread>
-#include <thread>
-#include <memory>  // 包含智能指针的头文件
-#include "GlobalDataStu.h"
+#include <atomic>
+#include <chrono>
 #include <csignal>
-#include <unistd.h>
-// 信号处理函数
-void signalHandler(int signum) 
+#include <cstdio>
+#include <mutex>
+#include <thread>
+
+#include "GlobalDataStu.h"
+#include "shdds.h"
+
+namespace
 {
-    shdds::deinit(false);
-    exit(signum);
+std::atomic<bool> g_running{true};
+
+// 以下统计只在订阅回调(单线程)里写, 退出汇总时主线程读, 用 mutex 保护
+std::mutex g_stat_mu;
+unsigned long g_recv = 0;
+unsigned long g_lost = 0;      // 通过序号 gap 推算出的丢包数
+long long g_lat_min = -1;
+long long g_lat_max = 0;
+long long g_lat_sum = 0;
+
+unsigned int g_expect = 0;     // 期望的下一条序号, 仅回调线程访问
+bool g_first = true;
+
+void onSignal(int)
+{
+    g_running = false;
 }
-void cutRetCbk(void* pMsg)
+
+void cutCbk(void* pMsg)
 {
-    CutMotor* msg = (CutMotor*)pMsg;
-    long long int send_time_stamp = msg->timestamp;
-    // 获取当前时间戳（微秒级别）
-    auto recv_time = std::chrono::high_resolution_clock::now();
-    
-    long long int recv_time_stamp = std::chrono::duration_cast<std::chrono::microseconds>(recv_time.time_since_epoch()).count();
+    CutMotor* msg = static_cast<CutMotor*>(pMsg);
 
-    // 计算延迟
-    long long int latency = recv_time_stamp - send_time_stamp;
-    std::cout << "Communication delay: " << latency << " microseconds" << std::endl;
-    printf("recv cutmotor state:%d,rpm:%d \n",msg->state,msg->rpm);
-}
-void leftRetCbk(void* pMsg)
-{
-    LeftMotor* msg = (LeftMotor*)pMsg;
-    printf("recv leftmotor state:%d,rpm:%d \n",msg->state,msg->rpm);
-}
-
-int main(int argc, char **argv)
-{
-    signal(SIGINT, signalHandler);
-    shdds::init(false);
-
-    std::shared_ptr<shdds::Subscriber<CutMotor>> m_Sub_Cut_Motor = std::make_shared<shdds::Subscriber<CutMotor>>("cutMotor");
-    std::function<void(void*)> cb = std::bind(cutRetCbk,std::placeholders::_1);
-    m_Sub_Cut_Motor->subscribe(cb);
-
-    std::shared_ptr<shdds::Subscriber<LeftMotor>> m_Sub_Left_Motor = std::make_shared<shdds::Subscriber<LeftMotor>>("leftMotor");
-    std::function<void(void*)> cb2 = std::bind(leftRetCbk,std::placeholders::_1);
-    m_Sub_Left_Motor->subscribe(cb2);
-
-    std::shared_ptr<shdds::Publisher<Battery>> m_Pub_Battery = std::make_shared<shdds::Publisher<Battery>>("battery");
-    Battery battery = 
+    // rpm 是发布端写入的递增序号; 晚加入的订阅者第一帧是 latched 的最新帧,
+    // 以它为基线, 历史消息不计入丢包
+    if (g_first)
     {
-        .soc=1,
-        .soh=98
-    };
-    while(1)
+        g_expect = msg->rpm;
+        g_first = false;
+        printf("[sub] first frame seq %u (latched 基线)\n", msg->rpm);
+    }
+    if (msg->rpm != g_expect)
+    {
+        unsigned long gap = msg->rpm - g_expect;
+        printf("[sub] gap: expect seq %u, got %u (%lu lost)\n", g_expect, msg->rpm, gap);
+        {
+            std::lock_guard<std::mutex> lk(g_stat_mu);
+            g_lost += gap;
+        }
+        g_expect = msg->rpm;
+    }
+    g_expect++;
+
+    long long now = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+    long long lat = now - msg->timestamp;
+    {
+        std::lock_guard<std::mutex> lk(g_stat_mu);
+        g_recv++;
+        g_lat_sum += lat;
+        if (g_lat_min < 0 || lat < g_lat_min) g_lat_min = lat;
+        if (lat > g_lat_max) g_lat_max = lat;
+    }
+    printf("[sub] recv cutMotor state:%u seq:%u latency:%lld us\n", msg->state, msg->rpm, lat);
+}
+} // namespace
+
+// 用法: ddssubtest
+// 订阅 cutMotor 并校验序号连续性、统计延迟; 同时周期性发布 battery 作为回环演示
+int main(int /*argc*/, char** /*argv*/)
+{
+    signal(SIGINT, onSignal);
+    signal(SIGTERM, onSignal);
+
+    if (!shdds::init(false))
+    {
+        fprintf(stderr, "[sub] shdds init failed\n");
+        return 1;
+    }
+
+    shdds::Subscriber<CutMotor> subCut("cutMotor");
+    subCut.subscribe(cutCbk);
+
+    shdds::Publisher<Battery> pubBattery("battery");
+    Battery battery{1, 98};
+    while (g_running)
     {
         battery.soh++;
-        m_Pub_Battery->publish(battery);
-        std::this_thread::sleep_for(std::chrono::seconds(3));
+        pubBattery.publish(battery);
+        for (int i = 0; i < 30 && g_running; ++i)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
-    exit(1);
+
+    {
+        std::lock_guard<std::mutex> lk(g_stat_mu);
+        printf("[sub] total recv %lu, lost %lu", g_recv, g_lost);
+        if (g_recv > 0)
+        {
+            printf(", latency min/avg/max = %lld/%lld/%lld us",
+                   g_lat_min, g_lat_sum / (long long)g_recv, g_lat_max);
+        }
+        printf("\n");
+    }
+
+    shdds::deinit();
+    return 0;
 }

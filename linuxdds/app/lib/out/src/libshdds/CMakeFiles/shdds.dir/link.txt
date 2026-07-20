@@ -1,1 +1,0 @@
-/usr/bin/g++ -fPIC -O3 -DNDEBUG -shared -Wl,-soname,libshdds.so.1 -o ../../../build/lib/libshdds.so.1.0.0 CMakeFiles/shdds.dir/src/DataManager.cpp.o CMakeFiles/shdds.dir/src/PublishMgr.cpp.o CMakeFiles/shdds.dir/src/ShddsMgr.cpp.o CMakeFiles/shdds.dir/src/SubscribeMgr.cpp.o CMakeFiles/shdds.dir/src/shdds.cpp.o 

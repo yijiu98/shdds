@@ -1,62 +1,69 @@
-#include <iostream>
-#include "shdds.h"
-#include <thread>
-#include <memory>  // 包含智能指针的头文件
-#include "GlobalDataStu.h"
+#include <atomic>
+#include <chrono>
 #include <csignal>
-#include <unistd.h>
-// 信号处理函数
-void signalHandler(int signum) 
+#include <cstdio>
+#include <cstdlib>
+#include <thread>
+
+#include "GlobalDataStu.h"
+#include "shdds.h"
+
+namespace
 {
-    shdds::deinit(true);
-    exit(signum);
+std::atomic<bool> g_running{true};
+
+void onSignal(int)
+{
+    g_running = false;
 }
-void batRetCbk(void* pMsg)
+
+void batteryCbk(void* pMsg)
 {
-    Battery* msg = (Battery*)pMsg;
-    printf("recv battery soc:%d,soh:%d \n",msg->soc,msg->soh);
+    Battery* msg = static_cast<Battery*>(pMsg);
+    printf("[pub] recv battery soc:%u soh:%u\n", msg->soc, msg->soh);
 }
+} // namespace
 
-
-int main(int argc, char **argv)
+// 用法: ddspubtest [interval_ms=1000] [count=0 表示一直发]
+// 启动顺序任意: pub/sub 谁先启动都可以, is_mgr 只决定退出时谁 shm_unlink
+int main(int argc, char** argv)
 {
-    signal(SIGINT, signalHandler);
-    shdds::init(true);
+    int interval_ms = (argc > 1) ? atoi(argv[1]) : 1000;
+    long count      = (argc > 2) ? atol(argv[2]) : 0;
 
-    std::shared_ptr<shdds::Publisher<CutMotor>> m_Pub_Cut_Motor = std::make_shared<shdds::Publisher<CutMotor>>("cutMotor");
-    CutMotor cutMotor = 
+    signal(SIGINT, onSignal);
+    signal(SIGTERM, onSignal);
+
+    if (!shdds::init(true))
     {
-        .state=1,
-        .rpm=2400
-    };
-
-    std::shared_ptr<shdds::Publisher<LeftMotor>> m_Pub_Left_Motor = std::make_shared<shdds::Publisher<LeftMotor>>("leftMotor");
-    LeftMotor leftMotor = 
-    {
-        .state=2,
-        .rpm=9600
-    };
-
-
-    std::shared_ptr<shdds::Subscriber<Battery>> m_Sub_Battery = std::make_shared<shdds::Subscriber<Battery>>("battery");
-    std::function<void(void*)> cb = std::bind(batRetCbk,std::placeholders::_1);
-    m_Sub_Battery->subscribe(cb);
-    while(true)
-    {
-          // 获取当前时间戳（微秒级别）并存储为 long long int
-        auto now = std::chrono::high_resolution_clock::now();
-        long long int time_stamp = std::chrono::duration_cast<std::chrono::microseconds>(now.time_since_epoch()).count();
-        cutMotor.timestamp=time_stamp;
-        cutMotor.rpm++;
-        m_Pub_Cut_Motor->publish(cutMotor);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-
-
-
-        leftMotor.rpm++;
-        m_Pub_Left_Motor->publish(leftMotor);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        fprintf(stderr, "[pub] shdds init failed\n");
+        return 1;
     }
-    // shdds::publish();
-    exit(1);
+
+    shdds::Publisher<CutMotor> pubCut("cutMotor");
+    shdds::Subscriber<Battery> subBattery("battery");
+    subBattery.subscribe(batteryCbk);
+
+    CutMotor msg{};
+    msg.state = 1;
+    long sent = 0;
+    while (g_running && (count == 0 || sent < count))
+    {
+        msg.rpm = static_cast<unsigned int>(sent + 1);  // rpm 兼作序号, 订阅端据此检查连续性
+        msg.timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        if (!pubCut.publish(msg))
+        {
+            fprintf(stderr, "[pub] publish cutMotor failed (seq %ld)\n", sent + 1);
+        }
+        sent++;
+        if (interval_ms > 0)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
+        }
+    }
+
+    printf("[pub] sent %ld message(s)\n", sent);
+    shdds::deinit();  // init(true) 记录为 mgr, 退出时清理 /dev/shm/myshm
+    return 0;
 }

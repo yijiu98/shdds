@@ -4,6 +4,8 @@
 
 BridgeMgr::BridgeMgr()
 {
+    // linux 侧共享内存由 mgr 进程(如 ddspubtest)负责清理, 桥接进程用 false
+    shdds::init(false);
     PublishToLinux();
     SubFromLinux();
 }
