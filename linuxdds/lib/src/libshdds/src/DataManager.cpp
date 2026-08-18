@@ -5,10 +5,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 #include <iostream>
+#include <algorithm>
 #include <vector>
 
 namespace shdds
@@ -38,8 +40,7 @@ bool lock_robust(pthread_mutex_t* m)
 struct PendingMsg
 {
     std::string topic;
-    uint32_t len;
-    char data[MAX_DATA_SIZE];
+    std::vector<char> data;
 };
 
 } // namespace
@@ -83,11 +84,37 @@ bool DataManager::init(bool is_mgr)
         return false;
     }
 
-    if (creator && ftruncate(fd, sizeof(shared_struct)) == -1)
+    if (creator)
     {
-        perror("ftruncate");
-        close(fd);
-        return false;
+        if (ftruncate(fd, sizeof(shared_struct)) == -1)
+        {
+            perror("ftruncate");
+            close(fd);
+            shm_unlink(SHM_NAME);  // 清理刚创建的 0 长度文件, 避免污染后续启动
+            return false;
+        }
+    }
+    else
+    {
+        // 创建者 shm_open 与 ftruncate 之间存在窗口, 直接 mmap 可能拿到 0 长度文件,
+        // 首次访问触发 SIGBUS; 等待文件就绪(最多 5 秒)再映射
+        bool sized = false;
+        for (int i = 0; i < 500; ++i)
+        {
+            struct stat st;
+            if (fstat(fd, &st) == 0 && st.st_size >= static_cast<off_t>(sizeof(shared_struct)))
+            {
+                sized = true;
+                break;
+            }
+            usleep(10 * 1000);
+        }
+        if (!sized)
+        {
+            fprintf(stderr, "[shdds] timeout waiting for shared memory sizing\n");
+            close(fd);
+            return false;
+        }
     }
 
     void* p = mmap(NULL, sizeof(shared_struct), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
@@ -193,7 +220,7 @@ void DataManager::SubThreadFunc()
     {
         for (int i = 0; i < MAX_TOPICS; ++i)
         {
-            m_last_seq[i] = m_data_shm->seq[i];
+            m_last_seq[i] = m_data_shm->topics[i].seq;
         }
         pthread_mutex_unlock(&m_data_shm->mutex);
     }
@@ -212,7 +239,8 @@ void DataManager::SubThreadFunc()
         // 锁内只做追赶和拷贝, 不执行用户回调
         for (int i = 0; i < MAX_TOPICS; ++i)
         {
-            if (m_data_shm->topics[i][0] == '\0')
+            Topic* t = &m_data_shm->topics[i];
+            if (t->name[0] == '\0')
             {
                 continue;
             }
@@ -220,34 +248,50 @@ void DataManager::SubThreadFunc()
             bool has_cb;
             {
                 std::lock_guard<std::mutex> g(m_map_mutex);
-                has_cb = m_sub_map.find(m_data_shm->topics[i]) != m_sub_map.end();
+                has_cb = m_sub_map.find(t->name) != m_sub_map.end();
             }
             if (!has_cb)
             {
-                m_last_seq[i] = m_data_shm->seq[i];  // 无人订阅的 topic 不积压
+                m_last_seq[i] = t->seq;  // 无人订阅的 topic 不积压
                 continue;
             }
 
             uint64_t next = m_last_seq[i];
-            uint64_t latest = m_data_shm->seq[i];
-            if (latest - next > RING_DEPTH)
+            uint64_t latest = t->seq;
+            if (latest - next > DESC_DEPTH)
             {
                 fprintf(stderr, "[shdds] topic %s: %llu message(s) dropped (subscriber too slow)\n",
-                        m_data_shm->topics[i],
-                        (unsigned long long)(latest - next - RING_DEPTH));
-                next = latest - RING_DEPTH;
+                        t->name,
+                        (unsigned long long)(latest - next - DESC_DEPTH));
+                next = latest - DESC_DEPTH;
             }
             while (next < latest)
             {
-                Slot* s = &m_data_shm->ring[i][next % RING_DEPTH];
-                if (s->seq == next + 1)  // 序号校验, 防止读到被覆盖的槽位
+                MsgDesc* d = &t->desc[next % DESC_DEPTH];
+                if (d->seq != next + 1)  // 序号校验, 描述符可能已被覆盖
                 {
-                    PendingMsg msg;
-                    msg.topic = m_data_shm->topics[i];
-                    msg.len = s->len;
-                    memcpy(msg.data, s->data, s->len);
-                    pending.push_back(std::move(msg));
+                    next++;
+                    continue;
                 }
+                if (t->pool_off - d->offset > TOPIC_POOL_SIZE)  // payload 已被池回卷覆盖
+                {
+                    fprintf(stderr, "[shdds] topic %s: message seq %llu payload overwritten\n",
+                            t->name, (unsigned long long)(next + 1));
+                    next++;
+                    continue;
+                }
+                // payload 可能跨池尾部回卷, 分两段拷贝
+                PendingMsg msg;
+                msg.topic = t->name;
+                msg.data.resize(d->len);
+                uint64_t pos = d->offset % TOPIC_POOL_SIZE;
+                uint32_t first = std::min<uint64_t>(d->len, TOPIC_POOL_SIZE - pos);
+                memcpy(msg.data.data(), t->pool + pos, first);
+                if (first < d->len)
+                {
+                    memcpy(msg.data.data() + first, t->pool, d->len - first);
+                }
+                pending.push_back(std::move(msg));
                 next++;
             }
             m_last_seq[i] = next;
@@ -283,7 +327,7 @@ void DataManager::SubThreadFunc()
             }
             if (cb != nullptr)
             {
-                cb(msg.data);
+                cb(msg.data.data());
             }
         }
     }
@@ -307,26 +351,33 @@ void DataManager::regSubCbk(const std::string& topic, std::function<void(void*)>
     {
         return;
     }
-    char data[MAX_DATA_SIZE];
-    uint32_t len = 0;
+    std::vector<char> data;
     bool have_last = false;
     if (lock_robust(&m_data_shm->mutex))
     {
         for (int i = 0; i < MAX_TOPICS; ++i)
         {
-            if (strncmp(m_data_shm->topics[i], topic.c_str(), MAX_TOPIC_NAME) != 0)
+            Topic* t = &m_data_shm->topics[i];
+            if (strncmp(t->name, topic.c_str(), MAX_TOPIC_NAME) != 0)
             {
                 continue;
             }
-            uint64_t latest = m_data_shm->seq[i];
+            uint64_t latest = t->seq;
             m_last_seq[i] = latest;  // 从最新开始消费, 避免订阅线程重复投递
             if (latest > 0)
             {
-                Slot* s = &m_data_shm->ring[i][(latest - 1) % RING_DEPTH];
-                if (s->seq == latest)  // 序号校验, 槽位可能已被覆盖
+                MsgDesc* d = &t->desc[(latest - 1) % DESC_DEPTH];
+                // 序号校验 + payload 未被池回卷覆盖
+                if (d->seq == latest && t->pool_off - d->offset <= TOPIC_POOL_SIZE)
                 {
-                    memcpy(data, s->data, s->len);
-                    len = s->len;
+                    data.resize(d->len);
+                    uint64_t pos = d->offset % TOPIC_POOL_SIZE;
+                    uint32_t first = std::min<uint64_t>(d->len, TOPIC_POOL_SIZE - pos);
+                    memcpy(data.data(), t->pool + pos, first);
+                    if (first < d->len)
+                    {
+                        memcpy(data.data() + first, t->pool, d->len - first);
+                    }
                     have_last = true;
                 }
             }
@@ -336,7 +387,7 @@ void DataManager::regSubCbk(const std::string& topic, std::function<void(void*)>
     }
     if (have_last)
     {
-        fun(data);  // 锁外回调
+        fun(data.data());  // 锁外回调
     }
 }
 
@@ -344,7 +395,7 @@ int DataManager::findTopicIndex(const std::string& topic_name)
 {
     for (int i = 0; i < MAX_TOPICS; ++i)
     {
-        if (strncmp(m_data_shm->topics[i], topic_name.c_str(), MAX_TOPIC_NAME) == 0)
+        if (strncmp(m_data_shm->topics[i].name, topic_name.c_str(), MAX_TOPIC_NAME) == 0)
         {
             return i;
         }
@@ -352,9 +403,9 @@ int DataManager::findTopicIndex(const std::string& topic_name)
 
     for (int i = 0; i < MAX_TOPICS; ++i)
     {
-        if (m_data_shm->topics[i][0] == '\0')
+        if (m_data_shm->topics[i].name[0] == '\0')
         {
-            snprintf(m_data_shm->topics[i], MAX_TOPIC_NAME, "%s", topic_name.c_str());
+            snprintf(m_data_shm->topics[i].name, MAX_TOPIC_NAME, "%s", topic_name.c_str());
             return i;
         }
     }
@@ -395,12 +446,26 @@ bool DataManager::write(const std::string& topic_name, const void* p_topic_msg, 
         return false;
     }
 
-    uint64_t next = m_data_shm->seq[topic_index];
-    Slot* s = &m_data_shm->ring[topic_index][next % RING_DEPTH];
-    memcpy(s->data, p_topic_msg, len);//存入数据
-    s->len = len;//存数据长度
-    s->seq = next + 1;//这个槽里装的是第几条
-    m_data_shm->seq[topic_index] = next + 1;//总序号，这个topic一共发到第几条了
+    Topic* t = &m_data_shm->topics[topic_index];
+
+    // payload 写入字节池(可能跨池尾部回卷, 分两段拷贝)
+    uint64_t pos = t->pool_off % TOPIC_POOL_SIZE;
+    uint32_t first = std::min<uint64_t>(len, TOPIC_POOL_SIZE - pos);
+    memcpy(t->pool + pos, p_topic_msg, first);
+    if (first < static_cast<uint32_t>(len))
+    {
+        memcpy(t->pool, static_cast<const char*>(p_topic_msg) + first,
+               len - first);
+    }
+
+    // 描述符记录元数据; seq 最后写, 订阅端按 seq 校验完整性
+    uint64_t next = t->seq;
+    MsgDesc* d = &t->desc[next % DESC_DEPTH];
+    d->offset = t->pool_off;
+    d->len = len;
+    d->seq = next + 1;
+    t->seq = next + 1;       // 该 topic 一共发到第几条
+    t->pool_off += len;      // 池已写字节总数
 
     pthread_cond_broadcast(&m_data_shm->cond);
     pthread_mutex_unlock(&m_data_shm->mutex);

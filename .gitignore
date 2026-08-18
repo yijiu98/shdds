@@ -2,6 +2,6 @@
 out/
 build/
 *.log
-
+.vscode/
 # 拷贝生成的依赖目录（已废弃，改为 CMake 直接引用源码路径）
 extern/
